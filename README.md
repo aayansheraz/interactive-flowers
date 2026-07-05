@@ -1,5 +1,9 @@
 # Interactive Flower
 
+**[Live demo →](https://aayansheraz.github.io/interactive-flowers/)** — works with your mouse; enable the webcam for hand tracking.
+
+![Interactive Flower screenshot](.github/screenshot.png)
+
 A web recreation of the TouchDesigner "Interactive Flower" concept — a plant grown
 from an **L-system** grammar that sways and blooms in response to your hand,
 tracked through the webcam with **MediaPipe**.
