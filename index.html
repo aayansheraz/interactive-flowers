@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interactive Flower — L-Systems + MediaPipe</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #08080a;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #f5efe6;
+  }
+
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* ---------- Glassmorphism ---------- */
+  .glass {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 20px;
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    box-shadow: 0 8px 32px rgba(10, 10, 30, 0.28),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+
+  /* ---------- Centered Title Header ---------- */
+  .title-header {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    width: 90%;
+    max-width: 800px;
+    text-align: center;
+    pointer-events: none;
+  }
+  .title-header h1 {
+    font-size: clamp(0.95rem, 2.6vw, 1.45rem);
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    background: linear-gradient(90deg, #ffd9a0, #ffb45e, #ff8f66);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 4px 12px rgba(255, 140, 80, 0.1);
+    line-height: 1.4;
+  }
+  .title-header p.desc {
+    margin-top: 6px;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    color: rgba(245, 239, 230, 0.55);
+    display: block;
+  }
+
+  /* ---------- Bottom Control Panel ---------- */
+  .bottom-bar {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    width: 92%;
+    max-width: 580px;
+    padding: 16px 22px;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* Horizontal layout for readouts */
+  .readout-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .readout-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .readout-item .label-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(245, 239, 230, 0.85);
+  }
+  .readout-item .val { font-variant-numeric: tabular-nums; color: #ffcf9e; }
+  .readout-item .bar {
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+  }
+  .readout-item .fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #7cb8ff, #ffc372, #ff9457);
+  }
+
+  .control-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 10px;
+    gap: 12px;
+  }
+  #camBtn {
+    cursor: pointer;
+    border: 1px solid rgba(255, 214, 160, 0.4);
+    background: rgba(255, 200, 130, 0.1);
+    color: #ffe1bd;
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    backdrop-filter: blur(8px);
+    transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+  }
+  #camBtn:hover {
+    background: rgba(255, 200, 130, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(255, 170, 90, 0.25);
+  }
+  #camBtn:disabled { opacity: 0.4; cursor: wait; transform: none; }
+
+  #status {
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    color: rgba(245, 239, 230, 0.55);
+    text-align: right;
+  }
+  #status.live { color: #9dffc4; }
+
+  #camView {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 140px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(10, 10, 30, 0.3);
+    transform: scaleX(-1);
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    z-index: 10;
+    pointer-events: none;
+  }
+  #camView.on { opacity: 0.9; }
+
+  @media (max-width: 600px) {
+    .title-header {
+      top: 14px;
+    }
+    .title-header p.desc {
+      display: none;
+    }
+    .bottom-bar {
+      bottom: 12px;
+      padding: 12px 14px;
+      gap: 10px;
+    }
+    .readout-row {
+      gap: 8px;
+    }
+    .readout-item .label-row {
+      font-size: 0.6rem;
+    }
+    .control-row {
+      flex-direction: column;
+      align-items: stretch;
+      text-align: center;
+      padding-top: 8px;
+      gap: 6px;
+    }
+    #camBtn {
+      padding: 7px 14px;
+      font-size: 0.68rem;
+    }
+    #status {
+      text-align: center;
+      font-size: 0.62rem;
+    }
+    #camView {
+      bottom: 120px;
+      right: 12px;
+      width: 100px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<div class="title-header">
+  <h1>THATS HOW YOUR SMILE MAKE EVERYTHING BEAUTIFUL</h1>
+  <p class="desc">A bouquet of purple balloon flowers that grows, sways and blooms in response to your hand or smile.</p>
+</div>
+
+<div class="bottom-bar glass">
+  <div class="readout-row">
+    <div class="readout-item">
+      <div class="label-row"><span>Grow</span><span class="val" id="growVal">0.00</span></div>
+      <div class="bar"><div class="fill" id="growFill"></div></div>
+    </div>
+    <div class="readout-item">
+      <div class="label-row"><span>Bloom</span><span class="val" id="bloomVal">0.00</span></div>
+      <div class="bar"><div class="fill" id="bloomFill"></div></div>
+    </div>
+    <div class="readout-item">
+      <div class="label-row"><span>Smile</span><span class="val" id="smileVal">0.00</span></div>
+      <div class="bar"><div class="fill" id="smileFill"></div></div>
+    </div>
+  </div>
+  
+  <div class="control-row">
+    <button id="camBtn">Enable Hand & Face Tracking</button>
+    <span id="status">Using mouse control</span>
+  </div>
+</div>
+
+<video id="camView" autoplay playsinline muted></video>
+
+<script type="module">
+/* ============================================================
+   1. BOUQUET CONFIGURATION — 4 separate, bundled stems
+   ============================================================ */
+const STEMS = [
+  { rel: -0.15, hFrac: 0.58, bow: -0.06, phase: 0.0, delay: 0.00, seed: 1, bend: 0, vel: 0 },
+  { rel: -0.04, hFrac: 0.40, bow: -0.02, phase: 1.5, delay: 0.12, seed: 2, bend: 0, vel: 0 },
+  { rel:  0.05, hFrac: 0.48, bow:  0.02, phase: 3.0, delay: 0.06, seed: 3, bend: 0, vel: 0 },
+  { rel:  0.16, hFrac: 0.53, bow:  0.06, phase: 4.5, delay: 0.18, seed: 4, bend: 0, vel: 0 }
+];
+
+const LEAVES = [
+  { rel: -0.05, len: 0.29, width: 0.050, lean: -0.32, dark: false, phase: 0.3, delay: 0.00 },
+  { rel: -0.02, len: 0.35, width: 0.056, lean: -0.16, dark: true,  phase: 1.1, delay: 0.05 },
+  { rel:  0.00, len: 0.39, width: 0.058, lean:  0.05, dark: false, phase: 2.2, delay: 0.10 },
+  { rel:  0.02, len: 0.33, width: 0.054, lean:  0.22, dark: true,  phase: 3.0, delay: 0.15 },
+  { rel:  0.05, len: 0.27, width: 0.048, lean:  0.34, dark: false, phase: 4.1, delay: 0.20 },
+  { rel: -0.01, len: 0.23, width: 0.046, lean: -0.45, dark: true,  phase: 5.0, delay: 0.25 },
+];
+
+function gustAt(t, phase) {
+  return 1 * (0.5 * Math.sin(t * 0.00042 + phase)
+            + 0.3 * Math.sin(t * 0.0011 + phase * 1.7 + 1.3)
+            + 0.2 * Math.sin(t * 0.0023 + phase * 2.3 + 4.1));
+}
+
+/* ============================================================
+   2. CANVAS SETUP
+   ============================================================ */
+const canvas = document.getElementById("stage");
+const ctx = canvas.getContext("2d");
+let W, H, DPR;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth || 360;
+  H = window.innerHeight || 640;
+  if (W <= 10) W = 360;
+  if (H <= 10) H = 640;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ============================================================
+   3. INPUT — hand (MediaPipe) with mouse/touch fallback
+   wind  : -1 .. 1   (hand/mouse x position)
+   bloom :  0 .. 1   (pinch distance / mouse y)
+   ============================================================ */
+const input = {
+  wind: 0, bloom: 0.6,
+  targetWind: 0, targetBloom: 0.6,
+  handActive: false,
+  faceActive: false,
+  smileVal: 0
+};
+
+window.addEventListener("mousemove", (e) => {
+  if (input.handActive) return;
+  if (W > 10 && H > 10) {
+    input.targetWind = (e.clientX / W) * 2 - 1;
+    input.targetBloom = 1 - e.clientY / H;
+  }
+});
+
+window.addEventListener("touchmove", (e) => {
+  if (input.handActive) return;
+  if (e.touches && e.touches.length > 0 && W > 10 && H > 10) {
+    const touch = e.touches[0];
+    input.targetWind = (touch.clientX / W) * 2 - 1;
+    input.targetBloom = 1 - touch.clientY / H;
+  }
+}, { passive: true });
+
+const statusEl = document.getElementById("status");
+const camBtn = document.getElementById("camBtn");
+const camView = document.getElementById("camView");
+const growVal = document.getElementById("growVal");
+const bloomVal = document.getElementById("bloomVal");
+const smileVal = document.getElementById("smileVal");
+const growFill = document.getElementById("growFill");
+const bloomFill = document.getElementById("bloomFill");
+const smileFill = document.getElementById("smileFill");
+
+camBtn.addEventListener("click", async () => {
+  camBtn.disabled = true;
+  statusEl.textContent = "Loading hand & face trackers...";
+  try {
+    const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14");
+    const { HandLandmarker, FaceLandmarker, FilesetResolver } = vision;
+
+    const fileset = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+    );
+    const [landmarker, faceLandmarker] = await Promise.all([
+      HandLandmarker.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 1,
+      }),
+      FaceLandmarker.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+          delegate: "GPU",
+        },
+        outputFaceBlendshapes: true,
+        runningMode: "VIDEO",
+        numFaces: 1,
+      })
+    ]);
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480 },
+    });
+    camView.srcObject = stream;
+    camView.classList.add("on");
+    await camView.play();
+
+    camBtn.style.display = "none";
+    statusEl.textContent = "Hand & Face tracking live";
+    statusEl.classList.add("live");
+
+    let lastVideoTime = -1;
+    let lastPinchBloom = 0.6;
+    let lastSmileBloom = 0.6;
+
+    function track() {
+      if (camView.currentTime !== lastVideoTime) {
+        lastVideoTime = camView.currentTime;
+        const timestamp = performance.now();
+        
+        // 1. Hand tracking
+        const result = landmarker.detectForVideo(camView, timestamp);
+        if (result.landmarks && result.landmarks.length > 0) {
+          const lm = result.landmarks[0];
+          input.handActive = true;
+          input.targetWind = (1 - lm[0].x) * 2 - 1;
+          const dx = lm[4].x - lm[8].x;
+          const dy = lm[4].y - lm[8].y;
+          const pinch = Math.hypot(dx, dy);
+          lastPinchBloom = Math.min(1, Math.max(0, (pinch - 0.03) / 0.22));
+        } else {
+          input.handActive = false;
+        }
+
+        // 2. Face/Smile tracking
+        const faceResult = faceLandmarker.detectForVideo(camView, timestamp);
+        if (faceResult.faceBlendshapes && faceResult.faceBlendshapes.length > 0) {
+          input.faceActive = true;
+          const blendshapes = faceResult.faceBlendshapes[0].categories;
+          const smileLeft = blendshapes.find(c => c.categoryName === "mouthSmileLeft")?.score || 0;
+          const smileRight = blendshapes.find(c => c.categoryName === "mouthSmileRight")?.score || 0;
+          const smile = (smileLeft + smileRight) / 2;
+          lastSmileBloom = Math.min(1, Math.max(0, (smile - 0.08) / 0.52));
+        } else {
+          input.faceActive = false;
+        }
+
+        // Resolve input targets
+        input.smileVal = input.faceActive ? lastSmileBloom : 0;
+        if (input.handActive || input.faceActive) {
+          if (input.handActive && input.faceActive) {
+            input.targetBloom = Math.max(lastPinchBloom, lastSmileBloom);
+            statusEl.textContent = "Hand & Face tracking live";
+          } else if (input.handActive) {
+            input.targetBloom = lastPinchBloom;
+            statusEl.textContent = "Hand tracking active (pinch to bloom)";
+          } else {
+            input.targetBloom = lastSmileBloom;
+            statusEl.textContent = "Face tracking active (smile to bloom)";
+          }
+        } else {
+          statusEl.textContent = "Show your hand or face to the camera";
+        }
+      }
+      requestAnimationFrame(track);
+    }
+    track();
+  } catch (err) {
+    camBtn.disabled = false;
+    statusEl.textContent = "Camera unavailable — using mouse";
+    console.error("Camera tracking failed:", err);
+  }
+});
+
+/* ============================================================
+   4. FLOWER SPRITES — glowing lotus heads, pre-rendered once
+   ============================================================ */
+const SPRITE = 256;
+const C = SPRITE / 2;
+
+// Clamp helper
+function clamp01(v) { return Math.min(1, Math.max(0, v)); }
+
+/* ============================================================
+   4. DETAILED REALISTIC BALLOON FLOWER & LEAF DRAWING
+   ============================================================ */
+function drawBalloonBud(ctx, size, p, seed, time) {
+  ctx.save();
+  ctx.rotate(Math.sin(time * 0.0006 + seed) * 0.08);
+
+  // Sepal (green calyx at the bottom)
+  ctx.fillStyle = "#346743";
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.25, 0);
+  ctx.lineTo(0, size * 0.32);
+  ctx.lineTo(size * 0.25, 0);
+  ctx.quadraticCurveTo(0, -size * 0.15, -size * 0.25, 0);
+  ctx.fill();
+
+  // Balloon body
+  const budGrad = getRadialGrad3(ctx, -size * 0.1, -size * 0.1, 0, 0, -size * 0.1, size * 0.8, 0, "#b19cd9", 0.6, "#784bab", 1, "#3e1e68");
+  ctx.fillStyle = budGrad;
+
+  ctx.beginPath();
+  // Teardrop shape pointing upwards
+  ctx.moveTo(0, -size * 0.85);
+  ctx.bezierCurveTo(-size * 0.55, -size * 0.8, -size * 0.6, 0, 0, size * 0.05);
+  ctx.bezierCurveTo(size * 0.6, 0, size * 0.55, -size * 0.8, 0, -size * 0.85);
+  ctx.fill();
+
+  // Seam lines (5 seams meeting at the tip)
+  ctx.strokeStyle = "rgba(50, 10, 90, 0.4)";
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < 5; i++) {
+    const ang = -Math.PI / 2 + (i - 2) * 0.25;
+    ctx.beginPath();
+    ctx.moveTo(0, -size * 0.85);
+    ctx.quadraticCurveTo(
+      Math.sin(ang) * size * 0.35, -size * 0.4,
+      Math.sin(ang * 1.5) * size * 0.1, size * 0.02
+    );
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawOpeningBud(ctx, size, p, seed, time) {
+  ctx.save();
+  ctx.rotate(Math.sin(time * 0.0006 + seed) * 0.08);
+
+  // Sepal
+  ctx.fillStyle = "#346743";
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.22, 0);
+  ctx.lineTo(0, size * 0.28);
+  ctx.lineTo(size * 0.22, 0);
+  ctx.quadraticCurveTo(0, -size * 0.12, -size * 0.22, 0);
+  ctx.fill();
+
+  const bulbY = size * 0.15;
+
+  // Draw the closed lower bulb
+  const budGrad = getRadialGrad3(ctx, -size * 0.1, -size * 0.1, 0, 0, -size * 0.1, size * 0.7, 0, "#a58cd3", 0.6, "#6c3fa3", 1, "#36185d");
+  ctx.fillStyle = budGrad;
+
+  ctx.beginPath();
+  ctx.ellipse(0, bulbY * 0.4, size * 0.35 * (1 - p * 0.25), size * 0.32 * (1 - p * 0.15), 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Draw 5 splitting tips flaring outwards
+  for (let i = 0; i < 5; i++) {
+    ctx.save();
+    const petalAng = (i * Math.PI * 2) / 5;
+    ctx.rotate(petalAng);
+    
+    // Flare angle increases with p
+    const flare = p * 0.45;
+    ctx.translate(0, -bulbY * 0.15);
+    ctx.rotate(flare);
+
+    const L = size * 0.58;
+    const W = size * 0.26 * (1 - p * 0.12);
+
+    const pGrad = getLinearGrad2(ctx, 0, 0, 0, -L, "#6c3fa3", "#a890d6");
+    ctx.fillStyle = pGrad;
+
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-W, -L * 0.45, 0, -L);
+    ctx.quadraticCurveTo(W, -L * 0.45, 0, 0);
+    ctx.fill();
+
+    // Vein lines inside the splitting petals
+    ctx.strokeStyle = "rgba(60, 20, 100, 0.35)";
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -L * 0.9);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+function drawOpenStarFlower(ctx, size, p, seed, time) {
+  ctx.save();
+  ctx.rotate(Math.sin(time * 0.0003 + seed * 2.1) * 0.10 + seed);
+
+  // Sepal behind petals
+  ctx.fillStyle = "#346743";
+  for (let i = 0; i < 5; i++) {
+    ctx.save();
+    ctx.rotate((i * Math.PI * 2) / 5 + Math.PI / 5);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-size * 0.12, -size * 0.32);
+    ctx.lineTo(size * 0.12, -size * 0.32);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 5 pointed petals
+  for (let i = 0; i < 5; i++) {
+    ctx.save();
+    ctx.rotate((i * Math.PI * 2) / 5);
+
+    const L = size * 0.95;
+    const W = size * 0.46;
+
+    const pGrad = getLinearGrad3(ctx, 0, 0, 0, -L, 0, "#5a2d9a", 0.55, "#7d52c1", 1, "#b399eb");
+
+    ctx.fillStyle = pGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-W, -L * 0.42, 0, -L);
+    ctx.quadraticCurveTo(W, -L * 0.42, 0, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // Dark purple radiating veins
+    ctx.strokeStyle = "rgba(50, 10, 95, 0.42)";
+    ctx.lineWidth = 1.0;
+    
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -L * 0.92);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(0, -L * 0.15);
+    ctx.quadraticCurveTo(-W * 0.35, -L * 0.4, -W * 0.6, -L * 0.65);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(0, -L * 0.35);
+    ctx.quadraticCurveTo(-W * 0.25, -L * 0.55, -W * 0.42, -L * 0.76);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(0, -L * 0.15);
+    ctx.quadraticCurveTo(W * 0.35, -L * 0.4, W * 0.6, -L * 0.65);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(0, -L * 0.35);
+    ctx.quadraticCurveTo(W * 0.25, -L * 0.55, W * 0.42, -L * 0.76);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // White-hot center core
+  const coreGrad = getRadialGrad3(ctx, 0, 0, 0, 0, 0, size * 0.28, 0, "rgba(255, 255, 255, 0.95)", 0.45, "rgba(216, 191, 216, 0.85)", 1, "rgba(90, 45, 154, 0)");
+  ctx.fillStyle = coreGrad;
+  ctx.beginPath();
+  ctx.arc(0, 0, size * 0.28, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Stamens
+  const pistilL = size * 0.20;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.lineWidth = 1.4;
+
+  for (let i = 0; i < 5; i++) {
+    ctx.save();
+    ctx.rotate((i * Math.PI * 2) / 5 + Math.PI / 5);
+    
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-size * 0.05, -pistilL * 0.5, 0, -pistilL * 0.8);
+    ctx.stroke();
+
+    ctx.fillStyle = "#fffae8";
+    ctx.beginPath();
+    ctx.arc(0, -pistilL * 0.8, size * 0.038, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#b399eb";
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // Pistil
+  ctx.save();
+  ctx.strokeStyle = "#4169e1";
+  ctx.lineWidth = 2.0;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, -pistilL * 0.85);
+  ctx.stroke();
+
+  // Stigma (3-lobed stigma at the tip)
+  ctx.fillStyle = "#8a2be2";
+  for (let j = 0; j < 3; j++) {
+    ctx.save();
+    ctx.translate(0, -pistilL * 0.85);
+    ctx.rotate((j * Math.PI * 2) / 3);
+    ctx.beginPath();
+    ctx.ellipse(0, -size * 0.03, size * 0.02, size * 0.04, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+
+  ctx.restore();
+}
+
+const gradCache = new Map();
+
+function getLinearGrad2(g, x0, y0, x1, y1, c0, c1) {
+  const key = `L2:${x0.toFixed(1)}|${y0.toFixed(1)}|${x1.toFixed(1)}|${y1.toFixed(1)}|${c0}|${c1}`;
+  let grad = gradCache.get(key);
+  if (!grad) {
+    grad = g.createLinearGradient(x0, y0, x1, y1);
+    grad.addColorStop(0, c0);
+    grad.addColorStop(1, c1);
+    gradCache.set(key, grad);
+  }
+  return grad;
+}
+
+function getLinearGrad3(g, x0, y0, x1, y1, p0, c0, p1, c1, p2, c2) {
+  const key = `L3:${x0.toFixed(1)}|${y0.toFixed(1)}|${x1.toFixed(1)}|${y1.toFixed(1)}|${p0}|${c0}|${p1}|${c1}|${p2}|${c2}`;
+  let grad = gradCache.get(key);
+  if (!grad) {
+    grad = g.createLinearGradient(x0, y0, x1, y1);
+    grad.addColorStop(p0, c0);
+    grad.addColorStop(p1, c1);
+    grad.addColorStop(p2, c2);
+    gradCache.set(key, grad);
+  }
+  return grad;
+}
+
+function getRadialGrad3(g, x0, y0, r0, x1, y1, r1, p0, c0, p1, c1, p2, c2) {
+  const key = `R3:${x0.toFixed(1)}|${y0.toFixed(1)}|${r0.toFixed(1)}|${x1.toFixed(1)}|${y1.toFixed(1)}|${r1.toFixed(1)}|${p0}|${c0}|${p1}|${c1}|${p2}|${c2}`;
+  let grad = gradCache.get(key);
+  if (!grad) {
+    const safeR0 = Math.max(0.1, r0);
+    const safeR1 = Math.max(0.1, r1);
+    grad = g.createRadialGradient(x0, y0, safeR0, x1, y1, safeR1);
+    grad.addColorStop(p0, c0);
+    grad.addColorStop(p1, c1);
+    grad.addColorStop(p2, c2);
+    gradCache.set(key, grad);
+  }
+  return grad;
+}
+
+const MOTION = 1;
+
+function drawRealisticLeaf(ctx, bx, by, S, leaf, t, growth) {
+  const p = Math.min(1, Math.max(0, (growth * 1.5 - leaf.delay) / 0.8));
+  if (p <= 0.02) return;
+
+  const portrait = H > W * 1.15;
+  const len = S * leaf.len * (portrait ? 1.6 : 1.1) * p * (0.78 + 0.22 * input.bloom);
+  const wd = S * leaf.width * (0.65 + 0.35 * p);
+  const x0 = bx + S * leaf.rel;
+
+  const sway = MOTION * Math.sin(t * 0.0011 + leaf.phase) * len * 0.045
+             + input.wind * len * 0.16;
+  const tipX = x0 + leaf.lean * len * 0.55 + sway;
+  const tipY = by - len;
+
+  // Midrib crease control point
+  const ctrlX = x0 + leaf.lean * len * 0.22 + sway * 0.5;
+  const ctrlY = by - len * 0.45;
+
+  // Left boundary control points
+  const cpL1_x = x0 - wd * 0.85 + leaf.lean * len * 0.10;
+  const cpL1_y = by - len * 0.45;
+  const cpL2_x = tipX - wd * 0.40;
+  const cpL2_y = tipY + len * 0.28;
+
+  // Right boundary control points
+  const cpR1_x = tipX + wd * 0.18;
+  const cpR1_y = tipY + len * 0.30;
+  const cpR2_x = x0 + wd * 0.85 + leaf.lean * len * 0.18;
+  const cpR2_y = by - len * 0.42;
+
+  const isLeftLight = leaf.lean >= 0;
+
+  // Leaf glow effect (similar to stem neon glow)
+  ctx.save();
+  ctx.shadowColor = "rgba(96, 255, 140, 0.48)";
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = "rgba(96, 255, 140, 0.22)";
+  ctx.lineWidth = Math.max(1.5, S * 0.005);
+  ctx.beginPath();
+  ctx.moveTo(x0, by);
+  ctx.bezierCurveTo(cpL1_x, cpL1_y, cpL2_x, cpL2_y, tipX, tipY);
+  ctx.bezierCurveTo(cpR1_x, cpR1_y, cpR2_x, cpR2_y, x0, by);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+
+  // 1. Draw LEFT half of the leaf
+  ctx.beginPath();
+  ctx.moveTo(x0, by);
+  ctx.bezierCurveTo(cpL1_x, cpL1_y, cpL2_x, cpL2_y, tipX, tipY);
+  ctx.quadraticCurveTo(ctrlX, ctrlY, x0, by);
+  ctx.closePath();
+
+  const gradL = ctx.createLinearGradient(x0 - wd * 0.5, by, tipX, tipY);
+  if (isLeftLight) {
+    gradL.addColorStop(0, "#43a047");
+    gradL.addColorStop(0.5, "#66bb6a");
+    gradL.addColorStop(1, "#81c784");
+  } else {
+    gradL.addColorStop(0, "#1b5e20");
+    gradL.addColorStop(0.5, "#2e7d32");
+    gradL.addColorStop(1, "#388e3c");
+  }
+  ctx.fillStyle = gradL;
+  ctx.fill();
+
+  // 2. Draw RIGHT half of the leaf
+  ctx.beginPath();
+  ctx.moveTo(x0, by);
+  ctx.quadraticCurveTo(ctrlX, ctrlY, tipX, tipY);
+  ctx.bezierCurveTo(cpR1_x, cpR1_y, cpR2_x, cpR2_y, x0, by);
+  ctx.closePath();
+
+  const gradR = ctx.createLinearGradient(x0, by, tipX + wd * 0.5, tipY);
+  if (!isLeftLight) {
+    gradR.addColorStop(0, "#43a047");
+    gradR.addColorStop(0.5, "#66bb6a");
+    gradR.addColorStop(1, "#81c784");
+  } else {
+    gradR.addColorStop(0, "#1b5e20");
+    gradR.addColorStop(0.5, "#2e7d32");
+    gradR.addColorStop(1, "#388e3c");
+  }
+  ctx.fillStyle = gradR;
+  ctx.fill();
+
+  // 3. Waxy Glaucous Sheen overlay
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x0, by);
+  ctx.bezierCurveTo(cpL1_x, cpL1_y, cpL2_x, cpL2_y, tipX, tipY);
+  ctx.bezierCurveTo(cpR1_x, cpR1_y, cpR2_x, cpR2_y, x0, by);
+  ctx.closePath();
+  ctx.clip();
+
+  const sheenGrad = ctx.createLinearGradient(x0 - wd, by - len * 0.5, x0 + wd, by - len * 0.5);
+  sheenGrad.addColorStop(0, "rgba(224, 242, 241, 0.14)");
+  sheenGrad.addColorStop(isLeftLight ? 0.25 : 0.75, "rgba(224, 242, 241, 0.22)");
+  sheenGrad.addColorStop(1, "rgba(224, 242, 241, 0.0)");
+  ctx.fillStyle = sheenGrad;
+  ctx.fillRect(x0 - wd, by - len, wd * 2, len);
+
+  // Parallel vein lines running from base to tip
+  ctx.strokeStyle = isLeftLight ? "rgba(255, 255, 255, 0.16)" : "rgba(255, 255, 255, 0.08)";
+  ctx.lineWidth = 0.8;
+  const numVeins = 3;
+  for (let v = 1; v <= numVeins; v++) {
+    const f = v / (numVeins + 1);
+    ctx.beginPath();
+    ctx.moveTo(x0 - wd * 0.4 * f, by);
+    ctx.bezierCurveTo(
+      cpL1_x * (1 - f) + ctrlX * f, cpL1_y,
+      cpL2_x * (1 - f) + ctrlX * f, cpL2_y,
+      tipX, tipY
+    );
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(x0 + wd * 0.4 * f, by);
+    ctx.bezierCurveTo(
+      cpR2_x * (1 - f) + ctrlX * f, cpR2_y,
+      cpR1_x * (1 - f) + ctrlX * f, cpR1_y,
+      tipX, tipY
+    );
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 4. Central midrib vein line
+  ctx.beginPath();
+  ctx.moveTo(x0, by);
+  ctx.quadraticCurveTo(ctrlX, ctrlY, tipX, tipY);
+  ctx.strokeStyle = isLeftLight ? "rgba(255, 255, 255, 0.32)" : "rgba(255, 255, 255, 0.15)";
+  ctx.lineWidth = Math.max(1, S * 0.0035);
+  ctx.stroke();
+
+  // Soft leaf perimeter outline
+  ctx.beginPath();
+  ctx.moveTo(x0, by);
+  ctx.bezierCurveTo(cpL1_x, cpL1_y, cpL2_x, cpL2_y, tipX, tipY);
+  ctx.bezierCurveTo(cpR1_x, cpR1_y, cpR2_x, cpR2_y, x0, by);
+  ctx.strokeStyle = "rgba(10, 35, 15, 0.28)";
+  ctx.lineWidth = 0.9;
+  ctx.stroke();
+}
+
+function drawFlower(x, y, time, seed, bloom, reveal) {
+  // reveal: 0..1 — the flower scales in once its branch has grown
+  const size = Math.min(W, H) * 0.115 * reveal;
+  if (size < 1) return;
+
+  ctx.save();
+  ctx.translate(x, y);
+
+  // Soft glowing ambient aura behind the flower (glowing purple/blue)
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const glowR = size * (1.1 + bloom * 1.3);
+  const glowGrad = getRadialGrad3(ctx, 0, 0, 0, 0, 0, glowR, 0, "rgba(147, 112, 219, 0.42)", 0.5, "rgba(75, 0, 130, 0.15)", 1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = glowGrad;
+  ctx.beginPath();
+  ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Morph from balloon-bud to open star flower based on bloom
+  if (bloom < 0.22) {
+    // 1. COMPLETELY CLOSED BALLOON BUD
+    const budP = clamp01(bloom / 0.22);
+    const budSize = size * 0.72;
+    drawBalloonBud(ctx, budSize, budP, seed, time);
+  } else if (bloom < 0.62) {
+    // 2. SEMI-OPEN BALLOON BUD
+    const openP = (bloom - 0.22) / 0.40;
+    drawOpeningBud(ctx, size, openP, seed, time);
+  } else {
+    // 3. FULLY OPEN STAR FLOWER
+    const starP = (bloom - 0.62) / 0.38;
+    drawOpenStarFlower(ctx, size, starP, seed, time);
+  }
+
+  ctx.restore();
+}
+
+const startTime = performance.now();
+const GROW_DURATION = 14000; // ms for the bouquet to fully grow
+
+function getBezierPoint(x0, y0, cx, cy, x1, y1, t) {
+  const x = (1 - t) * (1 - t) * x0 + 2 * (1 - t) * t * cx + t * t * x1;
+  const y = (1 - t) * (1 - t) * y0 + 2 * (1 - t) * t * cy + t * t * y1;
+  const dx = 2 * (1 - t) * (cx - x0) + 2 * t * (x1 - cx);
+  const dy = 2 * (1 - t) * (cy - y0) + 2 * t * (y1 - cy);
+  const ang = Math.atan2(dy, dx);
+  return { x, y, ang };
+}
+
+function drawStemCurve(ctx, x0, y0, cx, cy, x1, y1, p, baseW) {
+  ctx.save();
+  ctx.lineCap = "round";
+  
+  const steps = 30;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  for (let i = 1; i <= steps * p; i++) {
+    const u = i / steps;
+    const pt = getBezierPoint(x0, y0, cx, cy, x1, y1, u);
+    ctx.lineTo(pt.x, pt.y);
+  }
+
+  // 1. Glow pass
+  ctx.strokeStyle = "rgba(96, 255, 140, 0.16)";
+  ctx.lineWidth = baseW * 3.5;
+  ctx.stroke();
+
+  // 2. Core pass (HSLA green)
+  ctx.strokeStyle = "hsla(135, 100%, 62%, 0.95)";
+  ctx.lineWidth = baseW;
+  ctx.stroke();
+
+  // 3. Highlight pass (slightly offset)
+  ctx.strokeStyle = "hsla(140, 100%, 82%, 0.45)";
+  ctx.lineWidth = Math.max(0.5, baseW * 0.35);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawRaffiaRibbon(ctx, cx, y, w) {
+  ctx.save();
+  ctx.fillStyle = "#d2b48c"; // Raffia/beige
+  ctx.strokeStyle = "#8b7355";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect(cx - w * 0.5, y - 4, w, 8, 3);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function draw3DStem(ctx, bx, by, ctrlX, ctrlY, hx, hy, p, maxRadius, lightAngle) {
+  const N = 28;
+  const upto = Math.max(2, Math.round(N * p));
+  const leftSide = [];
+  const rightSide = [];
+
+  for (let k = 0; k <= upto; k++) {
+    const u = (k / N) * p;
+    const mt = 1 - u;
+
+    const x = mt * mt * bx + 2 * mt * u * ctrlX + u * u * hx;
+    const y = mt * mt * by + 2 * mt * u * ctrlY + u * u * hy;
+
+    const tx = 2 * mt * (ctrlX - bx) + 2 * u * (hx - ctrlX);
+    const ty = 2 * mt * (ctrlY - by) + 2 * u * (hy - ctrlY);
+    const len = Math.hypot(tx, ty) || 1;
+
+    const nx = -ty / len;
+    const ny = tx / len;
+
+    const radius = radiusTaper(u, maxRadius);
+
+    leftSide.push({ x: x + nx * radius, y: y + ny * radius });
+    rightSide.push({ x: x - nx * radius, y: y - ny * radius });
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(leftSide[0].x, leftSide[0].y);
+  for (let k = 1; k < leftSide.length; k++) {
+    ctx.lineTo(leftSide[k].x, leftSide[k].y);
+  }
+  for (let k = rightSide.length - 1; k >= 0; k--) {
+    ctx.lineTo(rightSide[k].x, rightSide[k].y);
+  }
+  ctx.closePath();
+
+  const midK = Math.floor(leftSide.length / 2);
+  const stemGrad = ctx.createLinearGradient(
+    leftSide[midK].x, leftSide[midK].y,
+    rightSide[midK].x, rightSide[midK].y
+  );
+  stemGrad.addColorStop(0, "#4caf50");
+  stemGrad.addColorStop(0.2, "#8bc34a");
+  stemGrad.addColorStop(0.65, "#2e7d32");
+  stemGrad.addColorStop(0.9, "#1b5e20");
+  stemGrad.addColorStop(1, "#274e13");
+
+  ctx.fillStyle = stemGrad;
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(10, 35, 15, 0.22)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function radiusTaper(u, maxRadius) {
+  return maxRadius * (1 - 0.35 * u);
+}
+
+function drawPlant(time, growth) {
+  const breeze = input.wind;
+  const cx = W / 2;
+  const baseY = H * 1.04;
+  const portrait = H > W * 1.15;
+
+  const blossoms = [];
+
+  // Update springs and draw separate stems
+  for (const st of STEMS) {
+    const p = Math.min(1, (growth - st.delay) / 0.72);
+    if (p <= 0.01) continue;
+
+    // Sway spring calculation
+    const gust = gustAt(time, st.phase);
+    const target = breeze * 0.20 + gust * 0.07;
+    st.vel += (target - st.bend) * 0.022 - st.vel * 0.11;
+    st.bend += st.vel;
+    st.bend = Math.max(-0.30, Math.min(0.30, st.bend));
+
+    const len = H * st.hFrac * (portrait ? 1.40 : 1.15);
+    const bx_head = cx + W * st.rel * 0.95;
+    const bx_base = cx + W * st.rel * 0.08;
+    const hx = bx_head + Math.sin(st.bend) * len * 0.85;
+    const hy = baseY - len * Math.cos(st.bend * 0.7);
+    const ctrlX = bx_base + (bx_head - bx_base) * 0.55;
+    const ctrlY = baseY - len * 0.5;
+
+    // Draw the 3D stem envelope
+    const stemMaxRadius = Math.max(1.8, Math.min(W, H) * 0.0055);
+    draw3DStem(ctx, bx_base, baseY, ctrlX, ctrlY, hx, hy, p, stemMaxRadius, -Math.PI / 4);
+
+    // Collect flowers for drawing at the tip
+    const scale = p > 0.72 ? (p - 0.72) / 0.28 : 0;
+    const tipPt = getBezierPoint(bx_base, baseY, ctrlX, ctrlY, hx, hy, p);
+    blossoms.push([tipPt.x, tipPt.y, st.seed, scale]);
+  }
+
+  // Draw base leaves (fanning out at the bottom)
+  for (const leaf of LEAVES) {
+    drawRealisticLeaf(ctx, cx, baseY, Math.min(W, H), leaf, time, growth);
+  }
+
+  // Draw the binding ribbon/tie on top
+  if (growth > 0.15) {
+    drawRaffiaRibbon(ctx, cx, baseY - H * 0.04, W < 768 ? 16 : 24);
+  }
+
+  // Draw the flower heads on top
+  for (const [bx, by, seed, reveal] of blossoms) {
+    if (reveal > 0.01) {
+      drawFlower(bx, by, time, seed, input.bloom, reveal);
+    }
+  }
+}
+
+/* ============================================================
+   6. AMBIENT — warm gradient sky and drifting embers
+   ============================================================ */
+const particles = Array.from({ length: 40 }, () => ({
+  x: Math.random(),
+  y: Math.random(),
+  r: 0.6 + Math.random() * 1.8,
+  speed: 0.00002 + Math.random() * 0.00006,
+  phase: Math.random() * Math.PI * 2,
+}));
+
+function drawBackground(time) {
+  // High-contrast deep studio black backdrop
+  const lin = ctx.createLinearGradient(0, H, W, 0);
+  lin.addColorStop(0, "#08080b");
+  lin.addColorStop(1, "#0d0c10");
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = lin;
+  ctx.fillRect(0, 0, W, H);
+
+  // Faint central vignette to ground it
+  const sunR = Math.max(0.1, Math.max(W, H) * 0.65);
+  const sun = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, sunR);
+  sun.addColorStop(0, "rgba(35, 35, 42, 0.26)");
+  sun.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = sun;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawParticles(time) {
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const p of particles) {
+    const px = (p.x + Math.sin(time * p.speed * 10 + p.phase) * 0.02 + input.wind * 0.01) * W;
+    const py = ((p.y - time * p.speed) % 1 + 1) % 1 * H;
+    const tw = 0.08 + 0.06 * Math.sin(time * 0.002 + p.phase); // Very faint studio dust
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = `rgba(240, 240, 245, ${tw})`;
+    ctx.beginPath();
+    ctx.arc(px, py, p.r * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ============================================================
+   7. MAIN LOOP
+   ============================================================ */
+function render(t) {
+  // Smooth the inputs so motion feels organic, not jittery.
+  input.wind += (input.targetWind - input.wind) * 0.06;
+  input.bloom += (input.targetBloom - input.bloom) * 0.08;
+
+  drawBackground(t);
+  drawParticles(t);
+
+  const raw = Math.min(1, t / GROW_DURATION);
+  const growth = 1 - Math.pow(1 - raw, 3);
+  drawPlant(t, growth);
+
+  // Live readouts, video-overlay style
+  growVal.textContent = growth.toFixed(2);
+  bloomVal.textContent = input.bloom.toFixed(2);
+  smileVal.textContent = input.smileVal.toFixed(2);
+  growFill.style.width = (growth * 100).toFixed(1) + "%";
+  bloomFill.style.width = (input.bloom * 100).toFixed(1) + "%";
+  smileFill.style.width = (input.smileVal * 100).toFixed(1) + "%";
+}
+
+function frame(now) {
+  render(now - startTime);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// Debug hook: render a specific moment on demand.
+window.__render = render;
+</script>
+</body>
+</html>
